@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use chrono::{DateTime, Utc};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -31,6 +32,10 @@ const STORAGE_FILE: &str = "tasks.json";
 struct Task {
     title: String,
     done: bool,
+    #[serde(default = "Utc::now")]
+    created_at: DateTime<Utc>,
+    #[serde(default)]
+    completed_at: Option<DateTime<Utc>>,
 }
 
 impl Task {
@@ -38,6 +43,8 @@ impl Task {
         Self {
             title: title.into(),
             done: false,
+            created_at: Utc::now(),
+            completed_at: None,
         }
     }
 }
@@ -107,6 +114,7 @@ impl App {
         if let Some(i) = self.list_state.selected() {
             if let Some(task) = self.tasks.get_mut(i) {
                 task.done = !task.done;
+                task.completed_at = if task.done { Some(Utc::now()) } else { None };
             }
         }
     }
