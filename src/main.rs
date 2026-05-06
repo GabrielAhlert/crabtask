@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
 use serde::{Deserialize, Serialize};
@@ -161,6 +161,14 @@ impl App {
     fn done_count(&self) -> usize {
         self.tasks.iter().filter(|t| t.done).count()
     }
+
+    fn progress_ratio(&self) -> f64 {
+        if self.tasks.is_empty() {
+            0.0
+        } else {
+            self.done_count() as f64 / self.tasks.len() as f64
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +284,7 @@ fn draw_ui(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3), // progress gauge
             Constraint::Length(3), // header
             Constraint::Min(3),    // task list
             Constraint::Length(3), // input box
@@ -283,10 +292,62 @@ fn draw_ui(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    draw_header(f, chunks[0], app);
-    draw_task_list(f, chunks[1], app);
-    draw_input(f, chunks[2], app);
-    draw_footer(f, chunks[3], app);
+    draw_progress(f, chunks[0], app);
+    draw_header(f, chunks[1], app);
+    draw_task_list(f, chunks[2], app);
+    draw_input(f, chunks[3], app);
+    draw_footer(f, chunks[4], app);
+}
+
+fn draw_progress(f: &mut Frame, area: Rect, app: &App) {
+    let total = app.tasks.len();
+    let done = app.done_count();
+    let ratio = app.progress_ratio();
+    let percent = (ratio * 100.0).round() as u16;
+
+    let gauge_color = if total == 0 {
+        Color::DarkGray
+    } else if percent >= 100 {
+        Color::Green
+    } else if percent >= 67 {
+        Color::LightGreen
+    } else if percent >= 34 {
+        Color::Yellow
+    } else if percent >= 1 {
+        Color::Red
+    } else {
+        Color::DarkGray
+    };
+
+    let label = if total == 0 {
+        "sem tarefas".to_string()
+    } else {
+        format!("{}/{}  •  {}%", done, total, percent)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " Progresso ",
+            Style::default().fg(Color::Rgb(255, 140, 60)).bold(),
+        ))
+        .border_style(Style::default().fg(Color::Rgb(255, 140, 60)));
+
+    let gauge = Gauge::default()
+        .block(block)
+        .gauge_style(
+            Style::default()
+                .fg(gauge_color)
+                .bg(Color::Rgb(30, 30, 30))
+                .add_modifier(Modifier::BOLD),
+        )
+        .ratio(ratio)
+        .label(Span::styled(
+            label,
+            Style::default().fg(Color::White).bold(),
+        ));
+
+    f.render_widget(gauge, area);
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {
