@@ -30,7 +30,7 @@ fn draw_list_screen(f: &mut Frame, app: &App) {
 
     let main_panels = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(chunks[2]);
 
     draw_progress(f, chunks[0], app);
