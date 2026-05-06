@@ -175,20 +175,28 @@ fn draw_task_list(f: &mut Frame, area: Rect, app: &App) {
         .tasks
         .iter()
         .map(|task| {
-            let (marker, marker_style, title_style) = if task.done {
-                (
-                    "[X] ",
-                    Style::default().fg(Color::Green).bold(),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::CROSSED_OUT),
-                )
+            let (marker, marker_style) = if task.done {
+                ("[X] ", Style::default().fg(Color::Green).bold())
             } else {
-                (
-                    "[ ] ",
-                    Style::default().fg(Color::Yellow).bold(),
-                    Style::default().fg(Color::White),
-                )
+                ("[ ] ", Style::default().fg(Color::Yellow).bold())
+            };
+
+            // Title color follows the first tag's category color when present.
+            let tag_color = task
+                .tags
+                .first()
+                .and_then(|t| app.category_color(t))
+                .map(|c| c.to_color());
+
+            let title_style = match (task.done, tag_color) {
+                (true, Some(c)) => Style::default()
+                    .fg(c)
+                    .add_modifier(Modifier::CROSSED_OUT),
+                (true, None) => Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::CROSSED_OUT),
+                (false, Some(c)) => Style::default().fg(c).bold(),
+                (false, None) => Style::default().fg(Color::White),
             };
 
             let line = Line::from(vec![
