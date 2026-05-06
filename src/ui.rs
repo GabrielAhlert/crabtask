@@ -1,3 +1,4 @@
+use chrono::Local;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -6,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, Task};
 
 pub(crate) fn draw_ui(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -20,11 +21,97 @@ pub(crate) fn draw_ui(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
+    let main_panels = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(chunks[2]);
+
     draw_progress(f, chunks[0], app);
     draw_header(f, chunks[1], app);
-    draw_task_list(f, chunks[2], app);
+    draw_task_list(f, main_panels[0], app);
+    draw_details(f, main_panels[1], app);
     draw_input(f, chunks[3], app);
     draw_footer(f, chunks[4], app);
+}
+
+fn format_local(ts: chrono::DateTime<chrono::Utc>) -> String {
+    ts.with_timezone(&Local).format("%d/%m/%Y %H:%M:%S").to_string()
+}
+
+fn draw_details(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " Detalhes ",
+            Style::default().fg(Color::Rgb(255, 140, 60)).bold(),
+        ))
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let selected: Option<&Task> = app
+        .list_state
+        .selected()
+        .and_then(|i| app.tasks.get(i));
+
+    let Some(task) = selected else {
+        let empty = Paragraph::new("\n  Nenhuma tarefa selecionada.")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(block)
+            .wrap(Wrap { trim: true });
+        f.render_widget(empty, area);
+        return;
+    };
+
+    let status_line = if task.done {
+        Line::from(vec![
+            Span::raw("  Status: "),
+            Span::styled("concluída", Style::default().fg(Color::Green).bold()),
+        ])
+    } else {
+        Line::from(vec![
+            Span::raw("  Status: "),
+            Span::styled("pendente", Style::default().fg(Color::Yellow).bold()),
+        ])
+    };
+
+    let title_line = Line::from(vec![
+        Span::raw("  Título: "),
+        Span::styled(
+            task.title.clone(),
+            Style::default().fg(Color::White).bold(),
+        ),
+    ]);
+
+    let created_line = Line::from(vec![
+        Span::raw("  Criada em:    "),
+        Span::styled(
+            format_local(task.created_at),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]);
+
+    let completed_line = match task.completed_at {
+        Some(ts) => Line::from(vec![
+            Span::raw("  Concluída em: "),
+            Span::styled(format_local(ts), Style::default().fg(Color::Green)),
+        ]),
+        None => Line::from(vec![
+            Span::raw("  Concluída em: "),
+            Span::styled("—", Style::default().fg(Color::DarkGray)),
+        ]),
+    };
+
+    let lines = vec![
+        Line::from(""),
+        title_line,
+        Line::from(""),
+        status_line,
+        Line::from(""),
+        created_line,
+        completed_line,
+    ];
+
+    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    f.render_widget(paragraph, area);
 }
 
 fn draw_progress(f: &mut Frame, area: Rect, app: &App) {
