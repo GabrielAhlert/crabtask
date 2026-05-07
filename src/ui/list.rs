@@ -305,6 +305,7 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_input(f: &mut Frame, area: Rect, app: &mut App) {
+    app.layout.input = Some(area);
     let (title_line, content, style, border_color) = match app.mode {
         InputMode::Normal => (
             Line::from(" Nova tarefa (pressione 'a') "),

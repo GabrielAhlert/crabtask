@@ -117,13 +117,47 @@ pub(crate) struct SlashMenu {
     pub(crate) selected: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FooterAction {
+    EnterInsert,
+    ToggleDone,
+    ToggleActive,
+    ToggleShowInactive,
+    DeleteSelected,
+    EnterCategoryEdit,
+    Quit,
+    ConfirmNewTask,
+    OpenSlashMenu,
+    CancelInsert,
+    SlashMenuConfirm,
+    SlashMenuClose,
+    NewCategory,
+    EditCategory,
+    DeleteCategory,
+    LeaveCategoryScreen,
+    CategoryColorPrev,
+    CategoryColorNext,
+    ConfirmCategoryForm,
+    CancelCategoryForm,
+    ConfirmDeleteCategory,
+    CancelDeleteCategory,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FooterHint {
+    pub(crate) area: Rect,
+    pub(crate) action: FooterAction,
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LayoutRects {
     pub(crate) task_list: Option<Rect>,
     pub(crate) category_list: Option<Rect>,
+    pub(crate) input: Option<Rect>,
     pub(crate) slash_menu: Option<Rect>,
     pub(crate) slash_menu_items: Vec<Rect>,
     pub(crate) color_cells: Vec<Rect>,
+    pub(crate) footer_hints: Vec<FooterHint>,
 }
 
 pub(crate) struct App {
