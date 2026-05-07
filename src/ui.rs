@@ -9,14 +9,18 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, AppMode, CategoryScreenMode, InputMode};
+use crate::app::{App, AppMode, CategoryScreenMode, FooterAction, FooterHint, InputMode};
+
+type HintGroup = (&'static str, String, Color, Option<FooterAction>);
 
 pub(crate) fn draw_ui(f: &mut Frame, app: &mut App) {
     app.layout.task_list = None;
     app.layout.category_list = None;
+    app.layout.input = None;
     app.layout.slash_menu = None;
     app.layout.slash_menu_items.clear();
     app.layout.color_cells.clear();
+    app.layout.footer_hints.clear();
 
     match app.screen {
         AppMode::List => list::draw_list_screen(f, app),
@@ -24,90 +28,207 @@ pub(crate) fn draw_ui(f: &mut Frame, app: &mut App) {
     }
 }
 
-pub(super) fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
-    let help = match app.screen {
+pub(super) fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
+    let groups: Vec<HintGroup> = match app.screen {
         AppMode::List => match app.mode {
             InputMode::Normal => {
                 let inactive_label = if app.show_inactive {
-                    "ocultar inativas"
+                    "ocultar inativas".to_string()
                 } else {
-                    "mostrar inativas"
+                    "mostrar inativas".to_string()
                 };
-                Line::from(vec![
-                    Span::styled(" ↑/↓ ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("nav  "),
-                    Span::styled(" a ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("add  "),
-                    Span::styled(" Esp ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("toggle  "),
-                    Span::styled(" x ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("ativa/inativa  "),
-                    Span::styled(" i ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw(inactive_label),
-                    Span::raw("  "),
-                    Span::styled(" d ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("del  "),
-                    Span::styled(" c ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("categorias  "),
-                    Span::styled(" q/Esc ", Style::default().fg(Color::Cyan).bold()),
-                    Span::raw("sair"),
-                ])
+                vec![
+                    (" ↑/↓ ", "nav".to_string(), Color::Cyan, None),
+                    (
+                        " a ",
+                        "add".to_string(),
+                        Color::Cyan,
+                        Some(FooterAction::EnterInsert),
+                    ),
+                    (
+                        " Esp ",
+                        "toggle".to_string(),
+                        Color::Cyan,
+                        Some(FooterAction::ToggleDone),
+                    ),
+                    (
+                        " x ",
+                        "ativa/inativa".to_string(),
+                        Color::Cyan,
+                        Some(FooterAction::ToggleActive),
+                    ),
+                    (
+                        " i ",
+                        inactive_label,
+                        Color::Cyan,
+                        Some(FooterAction::ToggleShowInactive),
+                    ),
+                    (
+                        " d ",
+                        "del".to_string(),
+                        Color::Cyan,
+                        Some(FooterAction::DeleteSelected),
+                    ),
+                    (
+                        " c ",
+                        "categorias".to_string(),
+                        Color::Cyan,
+                        Some(FooterAction::EnterCategoryEdit),
+                    ),
+                    (
+                        " q/Esc ",
+                        "sair".to_string(),
+                        Color::Cyan,
+                        Some(FooterAction::Quit),
+                    ),
+                ]
             }
             InputMode::Inserting => {
                 if app.slash_menu.is_some() {
-                    Line::from(vec![
-                        Span::styled(" ↑/↓ ", Style::default().fg(Color::Cyan).bold()),
-                        Span::raw("nav  "),
-                        Span::styled(" Enter ", Style::default().fg(Color::Green).bold()),
-                        Span::raw("escolher  "),
-                        Span::styled(" Esc ", Style::default().fg(Color::Red).bold()),
-                        Span::raw("fechar (mantém texto)  "),
-                        Span::styled(" digite ", Style::default().fg(Color::Cyan).bold()),
-                        Span::raw("filtrar"),
-                    ])
+                    vec![
+                        (" ↑/↓ ", "nav".to_string(), Color::Cyan, None),
+                        (
+                            " Enter ",
+                            "escolher".to_string(),
+                            Color::Green,
+                            Some(FooterAction::SlashMenuConfirm),
+                        ),
+                        (
+                            " Esc ",
+                            "fechar (mantém texto)".to_string(),
+                            Color::Red,
+                            Some(FooterAction::SlashMenuClose),
+                        ),
+                        (" digite ", "filtrar".to_string(), Color::Cyan, None),
+                    ]
                 } else {
-                    Line::from(vec![
-                        Span::styled(" Enter ", Style::default().fg(Color::Green).bold()),
-                        Span::raw("confirmar  "),
-                        Span::styled(" / ", Style::default().fg(Color::Cyan).bold()),
-                        Span::raw("categoria  "),
-                        Span::styled(" Esc ", Style::default().fg(Color::Red).bold()),
-                        Span::raw("cancelar"),
-                    ])
+                    vec![
+                        (
+                            " Enter ",
+                            "confirmar".to_string(),
+                            Color::Green,
+                            Some(FooterAction::ConfirmNewTask),
+                        ),
+                        (
+                            " / ",
+                            "categoria".to_string(),
+                            Color::Cyan,
+                            Some(FooterAction::OpenSlashMenu),
+                        ),
+                        (
+                            " Esc ",
+                            "cancelar".to_string(),
+                            Color::Red,
+                            Some(FooterAction::CancelInsert),
+                        ),
+                    ]
                 }
             }
         },
         AppMode::CategoryEdit => match app.category_screen_mode {
-            CategoryScreenMode::Browsing => Line::from(vec![
-                Span::styled(" ↑/↓ ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("nav  "),
-                Span::styled(" a ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("nova  "),
-                Span::styled(" e/Enter ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("editar  "),
-                Span::styled(" d ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("deletar  "),
-                Span::styled(" Esc ", Style::default().fg(Color::Red).bold()),
-                Span::raw("voltar"),
-            ]),
-            CategoryScreenMode::Editing => Line::from(vec![
-                Span::styled(" ←/→ ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("cor  "),
-                Span::styled(" digite ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("nome  "),
-                Span::styled(" Enter ", Style::default().fg(Color::Green).bold()),
-                Span::raw("salvar  "),
-                Span::styled(" Esc ", Style::default().fg(Color::Red).bold()),
-                Span::raw("cancelar"),
-            ]),
-            CategoryScreenMode::ConfirmDelete => Line::from(vec![
-                Span::styled(" y/Enter ", Style::default().fg(Color::Green).bold()),
-                Span::raw("confirmar  "),
-                Span::styled(" n/Esc ", Style::default().fg(Color::Red).bold()),
-                Span::raw("cancelar"),
-            ]),
+            CategoryScreenMode::Browsing => vec![
+                (" ↑/↓ ", "nav".to_string(), Color::Cyan, None),
+                (
+                    " a ",
+                    "nova".to_string(),
+                    Color::Cyan,
+                    Some(FooterAction::NewCategory),
+                ),
+                (
+                    " e/Enter ",
+                    "editar".to_string(),
+                    Color::Cyan,
+                    Some(FooterAction::EditCategory),
+                ),
+                (
+                    " d ",
+                    "deletar".to_string(),
+                    Color::Cyan,
+                    Some(FooterAction::DeleteCategory),
+                ),
+                (
+                    " Esc ",
+                    "voltar".to_string(),
+                    Color::Red,
+                    Some(FooterAction::LeaveCategoryScreen),
+                ),
+            ],
+            CategoryScreenMode::Editing => vec![
+                (
+                    " ← ",
+                    "cor anterior".to_string(),
+                    Color::Cyan,
+                    Some(FooterAction::CategoryColorPrev),
+                ),
+                (
+                    " → ",
+                    "próxima cor".to_string(),
+                    Color::Cyan,
+                    Some(FooterAction::CategoryColorNext),
+                ),
+                (" digite ", "nome".to_string(), Color::Cyan, None),
+                (
+                    " Enter ",
+                    "salvar".to_string(),
+                    Color::Green,
+                    Some(FooterAction::ConfirmCategoryForm),
+                ),
+                (
+                    " Esc ",
+                    "cancelar".to_string(),
+                    Color::Red,
+                    Some(FooterAction::CancelCategoryForm),
+                ),
+            ],
+            CategoryScreenMode::ConfirmDelete => vec![
+                (
+                    " y/Enter ",
+                    "confirmar".to_string(),
+                    Color::Green,
+                    Some(FooterAction::ConfirmDeleteCategory),
+                ),
+                (
+                    " n/Esc ",
+                    "cancelar".to_string(),
+                    Color::Red,
+                    Some(FooterAction::CancelDeleteCategory),
+                ),
+            ],
         },
     };
+
+    let mut spans: Vec<Span> = Vec::new();
+    let mut hints: Vec<FooterHint> = Vec::new();
+    let inner_left = area.x + 1;
+    let inner_top = area.y + 1;
+    let mut cursor: u16 = 0;
+    for (i, (key, label, color, action)) in groups.iter().enumerate() {
+        let key_w = key.chars().count() as u16;
+        let label_w = label.chars().count() as u16;
+        let total = key_w + label_w;
+        if let Some(a) = action {
+            hints.push(FooterHint {
+                area: Rect {
+                    x: inner_left + cursor,
+                    y: inner_top,
+                    width: total,
+                    height: 1,
+                },
+                action: *a,
+            });
+        }
+        spans.push(Span::styled(
+            *key,
+            Style::default().fg(*color).add_modifier(ratatui::style::Modifier::BOLD),
+        ));
+        spans.push(Span::raw(label.clone()));
+        cursor += total;
+        if i + 1 < groups.len() {
+            spans.push(Span::raw("  "));
+            cursor += 2;
+        }
+    }
+    app.layout.footer_hints = hints;
 
     let line = if let Some(msg) = &app.status {
         Line::from(Span::styled(
@@ -115,7 +236,7 @@ pub(super) fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Yellow).bold(),
         ))
     } else {
-        help
+        Line::from(spans)
     };
 
     let block = Block::default()

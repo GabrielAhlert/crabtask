@@ -13,7 +13,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 
-use crate::app::{App, AppMode, CategoryScreenMode, InputMode};
+use crate::app::{App, AppMode, CategoryScreenMode, FooterAction, InputMode};
 use crate::ui::draw_ui;
 
 pub(crate) type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -76,6 +76,44 @@ fn rect_contains(r: Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
+fn try_dispatch_footer(app: &mut App, m: MouseEvent) -> bool {
+    let hints = app.layout.footer_hints.clone();
+    for h in hints {
+        if rect_contains(h.area, m.column, m.row) {
+            dispatch_footer_action(app, h.action);
+            return true;
+        }
+    }
+    false
+}
+
+fn dispatch_footer_action(app: &mut App, action: FooterAction) {
+    match action {
+        FooterAction::EnterInsert => app.enter_insert_mode(),
+        FooterAction::ToggleDone => app.toggle_selected(),
+        FooterAction::ToggleActive => app.toggle_active_selected(),
+        FooterAction::ToggleShowInactive => app.toggle_show_inactive(),
+        FooterAction::DeleteSelected => app.delete_selected(),
+        FooterAction::EnterCategoryEdit => app.enter_category_edit(),
+        FooterAction::Quit => app.should_quit = true,
+        FooterAction::ConfirmNewTask => app.confirm_new_task(),
+        FooterAction::OpenSlashMenu => app.open_slash_menu(),
+        FooterAction::CancelInsert => app.cancel_insert_mode(),
+        FooterAction::SlashMenuConfirm => app.slash_menu_confirm(),
+        FooterAction::SlashMenuClose => app.slash_menu_close(),
+        FooterAction::NewCategory => app.start_new_category(),
+        FooterAction::EditCategory => app.start_edit_selected_category(),
+        FooterAction::DeleteCategory => app.request_delete_category(),
+        FooterAction::LeaveCategoryScreen => app.leave_category_screen(),
+        FooterAction::CategoryColorPrev => app.category_color_prev(),
+        FooterAction::CategoryColorNext => app.category_color_next(),
+        FooterAction::ConfirmCategoryForm => app.confirm_category_form(),
+        FooterAction::CancelCategoryForm => app.cancel_category_form(),
+        FooterAction::ConfirmDeleteCategory => app.confirm_delete_category(),
+        FooterAction::CancelDeleteCategory => app.cancel_delete_category(),
+    }
+}
+
 fn handle_list_mouse(app: &mut App, m: MouseEvent) {
     match m.kind {
         MouseEventKind::ScrollUp => {
@@ -93,9 +131,23 @@ fn handle_list_mouse(app: &mut App, m: MouseEvent) {
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
+            // While slash menu is open it captures clicks: inside = pick item, outside = close.
             if let Some(menu_rect) = app.layout.slash_menu {
                 if rect_contains(menu_rect, m.column, m.row) {
                     handle_slash_menu_click(app, m);
+                } else {
+                    app.slash_menu_close();
+                }
+                return;
+            }
+            if try_dispatch_footer(app, m) {
+                return;
+            }
+            if let Some(r) = app.layout.input {
+                if rect_contains(r, m.column, m.row) {
+                    if app.mode == InputMode::Normal {
+                        app.enter_insert_mode();
+                    }
                     return;
                 }
             }
@@ -105,23 +157,37 @@ fn handle_list_mouse(app: &mut App, m: MouseEvent) {
                 }
             }
         }
+        MouseEventKind::Down(MouseButton::Right) => {
+            if let Some(r) = app.layout.task_list {
+                if rect_contains(r, m.column, m.row) && task_list_select_at(app, r, m) {
+                    app.toggle_active_selected();
+                }
+            }
+        }
         _ => {}
     }
 }
 
-fn handle_task_list_click(app: &mut App, area: Rect, m: MouseEvent) {
+fn task_list_select_at(app: &mut App, area: Rect, m: MouseEvent) -> bool {
     let inner_top = area.y + 1;
-    let inner_left = area.x + 1;
     let inner_height = area.height.saturating_sub(2);
     if m.row < inner_top || m.row >= inner_top + inner_height {
-        return;
+        return false;
     }
     let row_offset = (m.row - inner_top) as usize;
     let target = app.list_state.offset() + row_offset;
     if target >= app.visible_indices().len() {
-        return;
+        return false;
     }
     app.list_state.select(Some(target));
+    true
+}
+
+fn handle_task_list_click(app: &mut App, area: Rect, m: MouseEvent) {
+    let inner_left = area.x + 1;
+    if !task_list_select_at(app, area, m) {
+        return;
+    }
     // Marker zone (after the " ▶ " highlight prefix): cols [inner+3 .. inner+7) = "[X] "
     if m.column >= inner_left + 3 && m.column < inner_left + 7 {
         app.toggle_selected();
@@ -143,6 +209,9 @@ fn handle_slash_menu_click(app: &mut App, m: MouseEvent) {
 
 fn handle_category_mouse(app: &mut App, m: MouseEvent) {
     if app.category_screen_mode == CategoryScreenMode::ConfirmDelete {
+        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
+            try_dispatch_footer(app, m);
+        }
         return;
     }
     match m.kind {
@@ -161,6 +230,9 @@ fn handle_category_mouse(app: &mut App, m: MouseEvent) {
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
+            if try_dispatch_footer(app, m) {
+                return;
+            }
             if let Some(r) = app.layout.category_list {
                 if rect_contains(r, m.column, m.row) {
                     handle_category_list_click(app, r, m);
