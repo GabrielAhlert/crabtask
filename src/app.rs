@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
@@ -116,6 +117,15 @@ pub(crate) struct SlashMenu {
     pub(crate) selected: usize,
 }
 
+#[derive(Debug, Default, Clone)]
+pub(crate) struct LayoutRects {
+    pub(crate) task_list: Option<Rect>,
+    pub(crate) category_list: Option<Rect>,
+    pub(crate) slash_menu: Option<Rect>,
+    pub(crate) slash_menu_items: Vec<Rect>,
+    pub(crate) color_cells: Vec<Rect>,
+}
+
 pub(crate) struct App {
     pub(crate) tasks: Vec<Task>,
     pub(crate) categories: Vec<Category>,
@@ -135,6 +145,8 @@ pub(crate) struct App {
     pub(crate) category_name_buffer: String,
     pub(crate) category_color_index: usize,
     pub(crate) editing_category_index: Option<usize>,
+
+    pub(crate) layout: LayoutRects,
 }
 
 impl App {
@@ -164,6 +176,7 @@ impl App {
             category_name_buffer: String::new(),
             category_color_index: 0,
             editing_category_index: None,
+            layout: LayoutRects::default(),
         }
     }
 

@@ -4,11 +4,14 @@ use std::{
 };
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+        MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 
 use crate::app::{App, AppMode, CategoryScreenMode, InputMode};
 use crate::ui::draw_ui;
@@ -45,21 +48,151 @@ pub(crate) fn run_app(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
         terminal.draw(|f| draw_ui(f, app))?;
 
         if event::poll(Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    match app.screen {
+                        AppMode::List => match app.mode {
+                            InputMode::Normal => handle_list_normal_key(app, key.code),
+                            InputMode::Inserting => handle_list_insert_key(app, key.code),
+                        },
+                        AppMode::CategoryEdit => handle_category_screen_key(app, key.code),
+                    }
                 }
-                match app.screen {
-                    AppMode::List => match app.mode {
-                        InputMode::Normal => handle_list_normal_key(app, key.code),
-                        InputMode::Inserting => handle_list_insert_key(app, key.code),
-                    },
-                    AppMode::CategoryEdit => handle_category_screen_key(app, key.code),
-                }
+                Event::Mouse(m) => match app.screen {
+                    AppMode::List => handle_list_mouse(app, m),
+                    AppMode::CategoryEdit => handle_category_mouse(app, m),
+                },
+                _ => {}
             }
         }
     }
     Ok(())
+}
+
+fn rect_contains(r: Rect, col: u16, row: u16) -> bool {
+    col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+}
+
+fn handle_list_mouse(app: &mut App, m: MouseEvent) {
+    match m.kind {
+        MouseEventKind::ScrollUp => {
+            if let Some(r) = app.layout.task_list {
+                if rect_contains(r, m.column, m.row) {
+                    app.select_previous();
+                }
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if let Some(r) = app.layout.task_list {
+                if rect_contains(r, m.column, m.row) {
+                    app.select_next();
+                }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(menu_rect) = app.layout.slash_menu {
+                if rect_contains(menu_rect, m.column, m.row) {
+                    handle_slash_menu_click(app, m);
+                    return;
+                }
+            }
+            if let Some(r) = app.layout.task_list {
+                if rect_contains(r, m.column, m.row) {
+                    handle_task_list_click(app, r, m);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_task_list_click(app: &mut App, area: Rect, m: MouseEvent) {
+    let inner_top = area.y + 1;
+    let inner_left = area.x + 1;
+    let inner_height = area.height.saturating_sub(2);
+    if m.row < inner_top || m.row >= inner_top + inner_height {
+        return;
+    }
+    let row_offset = (m.row - inner_top) as usize;
+    let target = app.list_state.offset() + row_offset;
+    if target >= app.visible_indices().len() {
+        return;
+    }
+    app.list_state.select(Some(target));
+    // Marker zone (after the " ▶ " highlight prefix): cols [inner+3 .. inner+7) = "[X] "
+    if m.column >= inner_left + 3 && m.column < inner_left + 7 {
+        app.toggle_selected();
+    }
+}
+
+fn handle_slash_menu_click(app: &mut App, m: MouseEvent) {
+    let items: Vec<Rect> = app.layout.slash_menu_items.clone();
+    for (i, r) in items.iter().enumerate() {
+        if rect_contains(*r, m.column, m.row) {
+            if let Some(menu) = app.slash_menu.as_mut() {
+                menu.selected = i;
+            }
+            app.slash_menu_confirm();
+            return;
+        }
+    }
+}
+
+fn handle_category_mouse(app: &mut App, m: MouseEvent) {
+    if app.category_screen_mode == CategoryScreenMode::ConfirmDelete {
+        return;
+    }
+    match m.kind {
+        MouseEventKind::ScrollUp => {
+            if let Some(r) = app.layout.category_list {
+                if rect_contains(r, m.column, m.row) {
+                    app.category_select_prev();
+                }
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if let Some(r) = app.layout.category_list {
+                if rect_contains(r, m.column, m.row) {
+                    app.category_select_next();
+                }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(r) = app.layout.category_list {
+                if rect_contains(r, m.column, m.row) {
+                    handle_category_list_click(app, r, m);
+                    return;
+                }
+            }
+            if app.category_screen_mode == CategoryScreenMode::Editing {
+                let cells: Vec<Rect> = app.layout.color_cells.clone();
+                for (i, r) in cells.iter().enumerate() {
+                    if rect_contains(*r, m.column, m.row) {
+                        app.category_color_index = i;
+                        return;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_category_list_click(app: &mut App, area: Rect, m: MouseEvent) {
+    let inner_top = area.y + 1;
+    let inner_height = area.height.saturating_sub(2);
+    if m.row < inner_top || m.row >= inner_top + inner_height {
+        return;
+    }
+    let row_offset = (m.row - inner_top) as usize;
+    let target = app.category_list_state.offset() + row_offset;
+    if target >= app.categories.len() {
+        return;
+    }
+    app.category_list_state.select(Some(target));
 }
 
 fn handle_list_normal_key(app: &mut App, code: KeyCode) {
