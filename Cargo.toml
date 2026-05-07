@@ -2,8 +2,10 @@
 name = "crabtask"
 version = "0.1.0"
 edition = "2021"
-authors = ["CrabTask"]
+authors = ["Gabriel Ahlert"]
 description = "A simple, fast TUI To-Do list written in Rust (a.k.a. OxiDo)"
+repository = "https://github.com/GabrielAhlert/crabtask"
+license = "MIT"
 
 [dependencies]
 ratatui = "0.28"
@@ -17,3 +19,8 @@ directories = "5"
 opt-level = 3
 lto = true
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
