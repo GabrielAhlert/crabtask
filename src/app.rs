@@ -60,10 +60,16 @@ pub(crate) struct Category {
     pub(crate) color: CategoryColor,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Task {
     pub(crate) title: String,
     pub(crate) done: bool,
+    #[serde(default = "default_true")]
+    pub(crate) active: bool,
     #[serde(default = "Utc::now")]
     pub(crate) created_at: DateTime<Utc>,
     #[serde(default)]
@@ -77,6 +83,7 @@ impl Task {
         Self {
             title: title.into(),
             done: false,
+            active: true,
             created_at: Utc::now(),
             completed_at: None,
             tags: Vec::new(),
@@ -118,6 +125,7 @@ pub(crate) struct App {
     pub(crate) input_buffer: String,
     pub(crate) status: Option<String>,
     pub(crate) should_quit: bool,
+    pub(crate) show_inactive: bool,
 
     pub(crate) pending_tags: Vec<String>,
     pub(crate) slash_menu: Option<SlashMenu>,
@@ -148,6 +156,7 @@ impl App {
             input_buffer: String::new(),
             status: None,
             should_quit: false,
+            show_inactive: false,
             pending_tags: Vec::new(),
             slash_menu: None,
             category_screen_mode: CategoryScreenMode::Browsing,
@@ -158,13 +167,39 @@ impl App {
         }
     }
 
+    pub(crate) fn visible_indices(&self) -> Vec<usize> {
+        self.tasks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| self.show_inactive || t.active)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    pub(crate) fn selected_task_index(&self) -> Option<usize> {
+        let visible = self.visible_indices();
+        self.list_state
+            .selected()
+            .and_then(|i| visible.get(i).copied())
+    }
+
+    fn clamp_selection_to_visible(&mut self, prev_visible_pos: usize) {
+        let visible = self.visible_indices();
+        if visible.is_empty() {
+            self.list_state.select(None);
+        } else if prev_visible_pos >= visible.len() {
+            self.list_state.select(Some(visible.len() - 1));
+        }
+    }
+
     pub(crate) fn select_next(&mut self) {
-        if self.tasks.is_empty() {
+        let visible = self.visible_indices();
+        if visible.is_empty() {
             self.list_state.select(None);
             return;
         }
         let i = match self.list_state.selected() {
-            Some(i) if i + 1 < self.tasks.len() => i + 1,
+            Some(i) if i + 1 < visible.len() => i + 1,
             Some(_) => 0,
             None => 0,
         };
@@ -172,12 +207,13 @@ impl App {
     }
 
     pub(crate) fn select_previous(&mut self) {
-        if self.tasks.is_empty() {
+        let visible = self.visible_indices();
+        if visible.is_empty() {
             self.list_state.select(None);
             return;
         }
         let i = match self.list_state.selected() {
-            Some(0) => self.tasks.len() - 1,
+            Some(0) => visible.len() - 1,
             Some(i) => i - 1,
             None => 0,
         };
@@ -185,8 +221,8 @@ impl App {
     }
 
     pub(crate) fn toggle_selected(&mut self) {
-        if let Some(i) = self.list_state.selected() {
-            if let Some(task) = self.tasks.get_mut(i) {
+        if let Some(real) = self.selected_task_index() {
+            if let Some(task) = self.tasks.get_mut(real) {
                 task.done = !task.done;
                 task.completed_at = if task.done { Some(Utc::now()) } else { None };
             }
@@ -194,16 +230,38 @@ impl App {
     }
 
     pub(crate) fn delete_selected(&mut self) {
-        if let Some(i) = self.list_state.selected() {
-            if i < self.tasks.len() {
-                self.tasks.remove(i);
-                if self.tasks.is_empty() {
-                    self.list_state.select(None);
-                } else if i >= self.tasks.len() {
-                    self.list_state.select(Some(self.tasks.len() - 1));
-                }
-            }
+        let Some(vis_i) = self.list_state.selected() else {
+            return;
+        };
+        let Some(real) = self.selected_task_index() else {
+            return;
+        };
+        self.tasks.remove(real);
+        self.clamp_selection_to_visible(vis_i);
+    }
+
+    pub(crate) fn toggle_active_selected(&mut self) {
+        let Some(vis_i) = self.list_state.selected() else {
+            return;
+        };
+        let Some(real) = self.selected_task_index() else {
+            return;
+        };
+        if let Some(task) = self.tasks.get_mut(real) {
+            task.active = !task.active;
         }
+        self.clamp_selection_to_visible(vis_i);
+    }
+
+    pub(crate) fn toggle_show_inactive(&mut self) {
+        let prev_real = self.selected_task_index();
+        self.show_inactive = !self.show_inactive;
+        let visible = self.visible_indices();
+        let fallback = if visible.is_empty() { None } else { Some(0) };
+        let new_sel = prev_real
+            .and_then(|r| visible.iter().position(|&v| v == r))
+            .or(fallback);
+        self.list_state.select(new_sel);
     }
 
     pub(crate) fn enter_insert_mode(&mut self) {
@@ -227,7 +285,11 @@ impl App {
             let mut task = Task::new(title);
             task.tags = std::mem::take(&mut self.pending_tags);
             self.tasks.push(task);
-            self.list_state.select(Some(self.tasks.len() - 1));
+            let new_real = self.tasks.len() - 1;
+            let visible = self.visible_indices();
+            if let Some(pos) = visible.iter().position(|&v| v == new_real) {
+                self.list_state.select(Some(pos));
+            }
         }
         self.input_buffer.clear();
         self.pending_tags.clear();
@@ -235,19 +297,20 @@ impl App {
         self.mode = InputMode::Normal;
     }
 
-    pub(crate) fn pending_count(&self) -> usize {
-        self.tasks.iter().filter(|t| !t.done).count()
+    pub(crate) fn done_count(&self) -> usize {
+        self.tasks.iter().filter(|t| t.active && t.done).count()
     }
 
-    pub(crate) fn done_count(&self) -> usize {
-        self.tasks.iter().filter(|t| t.done).count()
+    pub(crate) fn active_total(&self) -> usize {
+        self.tasks.iter().filter(|t| t.active).count()
     }
 
     pub(crate) fn progress_ratio(&self) -> f64 {
-        if self.tasks.is_empty() {
+        let active_total = self.active_total();
+        if active_total == 0 {
             0.0
         } else {
-            self.done_count() as f64 / self.tasks.len() as f64
+            self.done_count() as f64 / active_total as f64
         }
     }
 
