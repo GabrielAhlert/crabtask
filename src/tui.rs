@@ -67,6 +67,8 @@ fn handle_list_normal_key(app: &mut App, code: KeyCode) {
         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
         KeyCode::Char('a') => app.enter_insert_mode(),
         KeyCode::Char('d') => app.delete_selected(),
+        KeyCode::Char('x') => app.toggle_active_selected(),
+        KeyCode::Char('i') => app.toggle_show_inactive(),
         KeyCode::Char(' ') => app.toggle_selected(),
         KeyCode::Char('c') => app.enter_category_edit(),
         KeyCode::Down | KeyCode::Char('j') => app.select_next(),

@@ -20,28 +20,32 @@ fn draw_list_screen(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // header
-            Constraint::Length(3), // progress gauge
+            Constraint::Length(3), // header (title + progress)
             Constraint::Min(3),    // task list + details
             Constraint::Length(3), // input box
             Constraint::Length(3), // help / status
         ])
         .split(f.area());
 
+    let header_panels = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(chunks[0]);
+
     let main_panels = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(chunks[2]);
+        .split(chunks[1]);
 
-    draw_header(f, chunks[0], app);
-    draw_progress(f, chunks[1], app);
+    draw_header(f, header_panels[0]);
+    draw_progress(f, header_panels[1], app);
     draw_task_list(f, main_panels[0], app);
     draw_details(f, main_panels[1], app);
-    draw_input(f, chunks[3], app);
-    draw_footer(f, chunks[4], app);
+    draw_input(f, chunks[2], app);
+    draw_footer(f, chunks[3], app);
 
     if app.slash_menu.is_some() {
-        draw_slash_menu(f, chunks[3], app);
+        draw_slash_menu(f, chunks[2], app);
     }
 }
 
@@ -75,12 +79,12 @@ fn format_local(ts: chrono::DateTime<chrono::Utc>) -> String {
 }
 
 fn draw_progress(f: &mut Frame, area: Rect, app: &App) {
-    let total = app.tasks.len();
+    let active = app.active_total();
     let done = app.done_count();
     let ratio = app.progress_ratio();
     let percent = (ratio * 100.0).round() as u16;
 
-    let gauge_color = if total == 0 {
+    let gauge_color = if active == 0 {
         Color::DarkGray
     } else if percent >= 100 {
         Color::Green
@@ -94,10 +98,10 @@ fn draw_progress(f: &mut Frame, area: Rect, app: &App) {
         Color::DarkGray
     };
 
-    let label = if total == 0 {
+    let label = if active == 0 {
         "sem tarefas".to_string()
     } else {
-        format!("{}/{}  •  {}%", done, total, percent)
+        format!("{}/{}  •  {}%", done, active, percent)
     };
 
     let block = Block::default()
@@ -125,7 +129,7 @@ fn draw_progress(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(gauge, area);
 }
 
-fn draw_header(f: &mut Frame, area: Rect, app: &App) {
+fn draw_header(f: &mut Frame, area: Rect) {
     let title = Line::from(vec![
         Span::styled(
             "  CrabTask 🦀 ",
@@ -134,40 +138,22 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("— TUI To-Do em Rust", Style::default().fg(Color::Gray)),
     ]);
 
-    let stats = Line::from(vec![
-        Span::raw("  total: "),
-        Span::styled(
-            app.tasks.len().to_string(),
-            Style::default().fg(Color::White).bold(),
-        ),
-        Span::raw("  •  pendentes: "),
-        Span::styled(
-            app.pending_count().to_string(),
-            Style::default().fg(Color::Yellow).bold(),
-        ),
-        Span::raw("  •  concluídas: "),
-        Span::styled(
-            app.done_count().to_string(),
-            Style::default().fg(Color::Green).bold(),
-        ),
-        Span::raw("  •  categorias: "),
-        Span::styled(
-            app.categories.len().to_string(),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-    ]);
-
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(255, 140, 60)));
 
-    let paragraph = Paragraph::new(vec![title, stats]).block(block);
+    let paragraph = Paragraph::new(title).block(block);
     f.render_widget(paragraph, area);
 }
 
 fn draw_task_list(f: &mut Frame, area: Rect, app: &App) {
+    let title_text = if app.show_inactive {
+        " Tarefas (inc. inativas) ".to_string()
+    } else {
+        " Tarefas ".to_string()
+    };
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        " Tarefas ",
+        title_text,
         Style::default().fg(Color::Rgb(255, 140, 60)).bold(),
     ));
 
@@ -180,30 +166,49 @@ fn draw_task_list(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let items: Vec<ListItem> = app
-        .tasks
+    let visible = app.visible_indices();
+    if visible.is_empty() {
+        let empty = Paragraph::new(
+            "\n  Todas as tarefas estão inativas. Pressione 'i' para mostrá-las.",
+        )
+        .style(Style::default().fg(Color::DarkGray))
+        .block(block)
+        .wrap(Wrap { trim: true });
+        f.render_widget(empty, area);
+        return;
+    }
+
+    let items: Vec<ListItem> = visible
         .iter()
-        .map(|task| {
-            let (marker, marker_style) = if task.done {
+        .map(|&idx| {
+            let task = &app.tasks[idx];
+            let (marker, marker_style) = if !task.active {
+                ("[~] ", Style::default().fg(Color::DarkGray).bold())
+            } else if task.done {
                 ("[X] ", Style::default().fg(Color::Green).bold())
             } else {
                 ("[ ] ", Style::default().fg(Color::Yellow).bold())
             };
 
-            // Title color follows the first tag's category color when present.
             let tag_color = task
                 .tags
                 .first()
                 .and_then(|t| app.category_color(t))
                 .map(|c| c.to_color());
 
-            let title_style = match (task.done, tag_color) {
-                (true, Some(c)) => Style::default().fg(c).add_modifier(Modifier::CROSSED_OUT),
-                (true, None) => Style::default()
+            let title_style = if !task.active {
+                Style::default()
                     .fg(Color::DarkGray)
-                    .add_modifier(Modifier::CROSSED_OUT),
-                (false, Some(c)) => Style::default().fg(c).bold(),
-                (false, None) => Style::default().fg(Color::White),
+                    .add_modifier(Modifier::DIM)
+            } else {
+                match (task.done, tag_color) {
+                    (true, Some(c)) => Style::default().fg(c).add_modifier(Modifier::CROSSED_OUT),
+                    (true, None) => Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                    (false, Some(c)) => Style::default().fg(c).bold(),
+                    (false, None) => Style::default().fg(Color::White),
+                }
             };
 
             let line = Line::from(vec![
@@ -236,7 +241,7 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
         ))
         .border_style(Style::default().fg(Color::DarkGray));
 
-    let selected: Option<&Task> = app.list_state.selected().and_then(|i| app.tasks.get(i));
+    let selected: Option<&Task> = app.selected_task_index().and_then(|i| app.tasks.get(i));
 
     let Some(task) = selected else {
         let empty = Paragraph::new("\n  Nenhuma tarefa selecionada.")
@@ -247,7 +252,12 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
         return;
     };
 
-    let status_line = if task.done {
+    let status_line = if !task.active {
+        Line::from(vec![
+            Span::raw("  Status: "),
+            Span::styled("inativa", Style::default().fg(Color::DarkGray).bold()),
+        ])
+    } else if task.done {
         Line::from(vec![
             Span::raw("  Status: "),
             Span::styled("concluída", Style::default().fg(Color::Green).bold()),
@@ -460,20 +470,32 @@ fn draw_slash_menu(f: &mut Frame, input_area: Rect, app: &App) {
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let help = match app.screen {
         AppMode::List => match app.mode {
-            InputMode::Normal => Line::from(vec![
-                Span::styled(" ↑/↓ ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("nav  "),
-                Span::styled(" a ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("add  "),
-                Span::styled(" Esp ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("toggle  "),
-                Span::styled(" d ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("del  "),
-                Span::styled(" c ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("categorias  "),
-                Span::styled(" q/Esc ", Style::default().fg(Color::Cyan).bold()),
-                Span::raw("sair"),
-            ]),
+            InputMode::Normal => {
+                let inactive_label = if app.show_inactive {
+                    "ocultar inativas"
+                } else {
+                    "mostrar inativas"
+                };
+                Line::from(vec![
+                    Span::styled(" ↑/↓ ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("nav  "),
+                    Span::styled(" a ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("add  "),
+                    Span::styled(" Esp ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("toggle  "),
+                    Span::styled(" x ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("ativa/inativa  "),
+                    Span::styled(" i ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw(inactive_label),
+                    Span::raw("  "),
+                    Span::styled(" d ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("del  "),
+                    Span::styled(" c ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("categorias  "),
+                    Span::styled(" q/Esc ", Style::default().fg(Color::Cyan).bold()),
+                    Span::raw("sair"),
+                ])
+            }
             InputMode::Inserting => {
                 if app.slash_menu.is_some() {
                     Line::from(vec![
