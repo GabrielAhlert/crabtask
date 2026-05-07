@@ -1,10 +1,15 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+};
 
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::app::{Category, Task};
 
-pub(crate) const STORAGE_FILE: &str = "tasks.json";
+const STORAGE_FILE_NAME: &str = "tasks.json";
+const ENV_OVERRIDE: &str = "CRABTASK_FILE";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct Storage {
@@ -20,16 +25,28 @@ struct StorageRef<'a> {
     categories: &'a [Category],
 }
 
-fn storage_path() -> PathBuf {
-    PathBuf::from(STORAGE_FILE)
+/// Resolve the storage file path with priority: CLI override > env > XDG/platform default.
+/// Falls back to `./tasks.json` only if the platform dirs cannot be determined.
+pub(crate) fn resolve_storage_path(cli_override: Option<PathBuf>) -> PathBuf {
+    if let Some(p) = cli_override {
+        return p;
+    }
+    if let Ok(p) = env::var(ENV_OVERRIDE) {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    if let Some(pd) = ProjectDirs::from("", "", "crabtask") {
+        return pd.data_dir().join(STORAGE_FILE_NAME);
+    }
+    PathBuf::from(STORAGE_FILE_NAME)
 }
 
-pub(crate) fn load_storage() -> Storage {
-    let path = storage_path();
+pub(crate) fn load_storage(path: &Path) -> Storage {
     if !path.exists() {
         return Storage::default();
     }
-    let Ok(content) = fs::read_to_string(&path) else {
+    let Ok(content) = fs::read_to_string(path) else {
         return Storage::default();
     };
     if content.trim().is_empty() {
@@ -48,9 +65,14 @@ pub(crate) fn load_storage() -> Storage {
     Storage::default()
 }
 
-pub(crate) fn save_storage(tasks: &[Task], categories: &[Category]) -> io::Result<()> {
+pub(crate) fn save_storage(path: &Path, tasks: &[Task], categories: &[Category]) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
     let wire = StorageRef { tasks, categories };
     let json = serde_json::to_string_pretty(&wire)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    fs::write(storage_path(), json)
+    fs::write(path, json)
 }
