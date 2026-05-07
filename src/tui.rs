@@ -10,7 +10,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use crate::app::{App, AppMode, CategoryFocus, InputMode};
+use crate::app::{App, AppMode, CategoryScreenMode, InputMode};
 use crate::ui::draw_ui;
 
 pub(crate) type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -54,7 +54,7 @@ pub(crate) fn run_app(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
                         InputMode::Normal => handle_list_normal_key(app, key.code),
                         InputMode::Inserting => handle_list_insert_key(app, key.code),
                     },
-                    AppMode::CategoryEdit => handle_category_edit_key(app, key.code),
+                    AppMode::CategoryEdit => handle_category_screen_key(app, key.code),
                 }
             }
         }
@@ -71,42 +71,58 @@ fn handle_list_normal_key(app: &mut App, code: KeyCode) {
         KeyCode::Char('c') => app.enter_category_edit(),
         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
         KeyCode::Up | KeyCode::Char('k') => app.select_previous(),
-        KeyCode::Char(c) if ('1'..='9').contains(&c) => {
-            let idx = (c as u8 - b'1') as usize;
-            app.toggle_tag_on_selected(idx);
-        }
         _ => {}
     }
 }
 
 fn handle_list_insert_key(app: &mut App, code: KeyCode) {
+    if app.slash_menu.is_some() {
+        match code {
+            KeyCode::Up => app.slash_menu_select_prev(),
+            KeyCode::Down | KeyCode::Tab => app.slash_menu_select_next(),
+            KeyCode::Esc => app.slash_menu_close(),
+            KeyCode::Enter => app.slash_menu_confirm(),
+            KeyCode::Backspace => app.input_pop_char(),
+            KeyCode::Char(c) => app.input_push_char(c),
+            _ => {}
+        }
+        return;
+    }
+
     match code {
         KeyCode::Enter => app.confirm_new_task(),
         KeyCode::Esc => app.cancel_insert_mode(),
-        KeyCode::Backspace => {
-            app.input_buffer.pop();
-        }
-        KeyCode::Char(c) => app.input_buffer.push(c),
+        KeyCode::Backspace => app.input_pop_char(),
+        KeyCode::Char('/') => app.open_slash_menu(),
+        KeyCode::Char(c) => app.input_push_char(c),
         _ => {}
     }
 }
 
-fn handle_category_edit_key(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Esc => app.cancel_category_edit(),
-        KeyCode::Enter => app.confirm_category_edit(),
-        KeyCode::Tab => app.category_toggle_focus(),
-        _ => match app.category_focus {
-            CategoryFocus::Name => match code {
-                KeyCode::Backspace => app.category_name_pop(),
-                KeyCode::Char(c) => app.category_name_push(c),
-                _ => {}
-            },
-            CategoryFocus::Color => match code {
-                KeyCode::Left | KeyCode::Char('h') => app.category_color_prev(),
-                KeyCode::Right | KeyCode::Char('l') => app.category_color_next(),
-                _ => {}
-            },
+fn handle_category_screen_key(app: &mut App, code: KeyCode) {
+    match app.category_screen_mode {
+        CategoryScreenMode::Browsing => match code {
+            KeyCode::Esc | KeyCode::Char('q') => app.leave_category_screen(),
+            KeyCode::Down | KeyCode::Char('j') => app.category_select_next(),
+            KeyCode::Up | KeyCode::Char('k') => app.category_select_prev(),
+            KeyCode::Char('a') => app.start_new_category(),
+            KeyCode::Char('e') | KeyCode::Enter => app.start_edit_selected_category(),
+            KeyCode::Char('d') => app.request_delete_category(),
+            _ => {}
+        },
+        CategoryScreenMode::Editing => match code {
+            KeyCode::Esc => app.cancel_category_form(),
+            KeyCode::Enter => app.confirm_category_form(),
+            KeyCode::Left => app.category_color_prev(),
+            KeyCode::Right => app.category_color_next(),
+            KeyCode::Backspace => app.category_name_pop(),
+            KeyCode::Char(c) => app.category_name_push(c),
+            _ => {}
+        },
+        CategoryScreenMode::ConfirmDelete => match code {
+            KeyCode::Char('y') | KeyCode::Enter => app.confirm_delete_category(),
+            KeyCode::Char('n') | KeyCode::Esc => app.cancel_delete_category(),
+            _ => {}
         },
     }
 }
